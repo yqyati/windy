@@ -7,6 +7,7 @@
 import sys
 import json
 from typing import List, Dict, Any
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QPushButton, QLabel, QScrollArea, QFrame, QFileDialog,
@@ -16,6 +17,80 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QResizeEvent
 
 from src.screenshot import ScreenshotCapture
+from agent import Agent, MessageRole, PRESET_SYSTEM_PROMPTS
+
+
+class ChatLogger:
+    """聊天日志记录器"""
+
+    def __init__(self, log_dir: str = 'logs'):
+        """
+        初始化日志记录器
+
+        Args:
+            log_dir: 日志目录
+        """
+        import os
+        self.log_dir = log_dir
+        # 创建日志目录
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+    def save_messages(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        保存消息到日志文件
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            保存的文件路径
+        """
+        # 生成文件名：聊天日志_YYYYMMDD_HHMMSS.json
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'聊天日志_{timestamp}.json'
+        filepath = f'{self.log_dir}/{filename}'
+
+        # 保存到文件
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump({
+                'timestamp': datetime.now().isoformat(),
+                'message_count': len(messages),
+                'messages': messages
+            }, f, ensure_ascii=False, indent=2)
+
+        return filepath
+
+    def log_to_console(self, messages: List[Dict[str, Any]]) -> None:
+        """
+        打印消息到控制台
+
+        Args:
+            messages: 消息列表
+        """
+        print("\n" + "="*60)
+        print("当前对话上下文:")
+        print("="*60)
+
+        for i, msg in enumerate(messages, 1):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+
+            print(f"\n[{i}] {role.upper()}:")
+
+            if isinstance(content, list):
+                # 多模态消息
+                for item in content:
+                    if item.get('type') == 'text':
+                        print(f"  {item.get('text', '')}")
+                    elif item.get('type') == 'image_url':
+                        print(f"  [图片: {item['image_url']['url'][:50]}...]")
+            else:
+                print(f"  {content}")
+
+        print("\n" + "="*60)
+        print(f"共 {len(messages)} 条消息")
+        print("="*60 + "\n")
 
 
 class ChatThread(QThread):
@@ -185,10 +260,22 @@ class ChatWindow(QMainWindow):
         self.ai_client = ai_client
         self.config_manager = config_manager
         self.config = config
-        self.messages = []
         self.current_image = None
         self.is_loading = False
         self.assistant_bubble = None
+
+        # 创建日志记录器
+        self.logger = ChatLogger()
+
+        # 创建Agent，支持多轮对话
+        # systemPrompt可选，不设置则不加system消息以提高响应速度
+        system_prompt = config.get('systemPrompt', None)
+        self.agent = Agent(
+            system_prompt=system_prompt,
+            ai_client=ai_client,
+            max_history=50,
+            on_stream=self._on_stream_chunk
+        )
 
         self.setup_ui()
         self.setup_shortcuts()
@@ -412,6 +499,26 @@ class ChatWindow(QMainWindow):
         # 这里可以添加全局快捷键
         pass
 
+    def closeEvent(self, event):
+        """窗口关闭事件 - 保存日志"""
+        try:
+            messages = self.agent.get_messages()
+
+            if messages:
+                # 打印到控制台
+                self.logger.log_to_console(messages)
+
+                # 保存到文件
+                filepath = self.logger.save_messages(messages)
+                print(f"日志已保存到: {filepath}")
+            else:
+                print("没有对话历史需要保存")
+
+        except Exception as e:
+            print(f"保存日志失败: {e}")
+
+        super().closeEvent(event)
+
     def eventFilter(self, obj, event):
         """事件过滤器 - 处理回车发送"""
         if obj == self.message_input and event.type() == event.Type.KeyPress:
@@ -435,22 +542,20 @@ class ChatWindow(QMainWindow):
         # 移除欢迎消息
         self._remove_welcome_message()
 
-        # 构建用户消息
-        user_message = {'role': 'user'}
-
+        # 构建用户消息内容
         if self.current_image:
-            user_message['content'] = [
+            user_content = [
                 {'type': 'text', 'text': text or '请分析这张图片'},
                 {'type': 'image_url', 'image_url': {'url': self.current_image}}
             ]
         else:
-            user_message['content'] = text
+            user_content = text
 
-        # 添加到历史
-        self.messages.append(user_message)
+        # 先在Agent中添加用户消息
+        self.agent.add_message(MessageRole.USER, user_content)
 
-        # 显示用户消息
-        self._append_message('user', user_message['content'])
+        # 显示用户消息（在发送前显示）
+        self._append_message('user', user_content)
 
         # 清空输入
         self.message_input.clear()
@@ -460,13 +565,13 @@ class ChatWindow(QMainWindow):
         # 创建assistant消息气泡（空内容，用于流式更新）
         self.assistant_bubble = self._append_message('assistant', '', streamable=True)
 
-        # 发送请求
+        # 发送请求（使用Agent）
         self.is_loading = True
         self.send_btn.setEnabled(False)
         self.send_btn.setText('发送中...')
 
-        # 创建线程
-        self.chat_thread = ChatThread(self.ai_client, self.messages)
+        # 创建线程 - 使用Agent的messages（现在已经包含用户消息）
+        self.chat_thread = ChatThread(self.ai_client, self.agent.get_messages())
         self.chat_thread.stream_received.connect(self._on_stream_chunk)
         self.chat_thread.stream_finished.connect(self._on_stream_finished)
         self.chat_thread.error_occurred.connect(self._on_error)
@@ -479,11 +584,8 @@ class ChatWindow(QMainWindow):
         self.send_btn.setText('发送')
 
         assistant_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
-        assistant_message = {
-            'role': 'assistant',
-            'content': assistant_content
-        }
-        self.messages.append(assistant_message)
+        # 使用Agent添加assistant消息
+        self.agent.add_message(MessageRole.ASSISTANT, assistant_content)
         self._append_message('assistant', assistant_content)
 
     def _on_stream_chunk(self, chunk: str):
@@ -501,12 +603,9 @@ class ChatWindow(QMainWindow):
         self.send_btn.setEnabled(True)
         self.send_btn.setText('发送')
 
-        # 保存完整消息到历史
-        assistant_message = {
-            'role': 'assistant',
-            'content': full_content
-        }
-        self.messages.append(assistant_message)
+        # 保存完整消息到Agent历史（仅当内容非空时）
+        if full_content and full_content.strip():
+            self.agent.add_message(MessageRole.ASSISTANT, full_content)
         self.assistant_bubble = None
 
     def _on_error(self, error):
