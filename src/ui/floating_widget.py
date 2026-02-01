@@ -19,6 +19,8 @@ class FloatingWidget(QWidget):
         super().__init__()
         self.chat_window = chat_window
         self.drag_position = None
+        self.click_start_pos = None
+        self.max_click_distance = 5  # 最大点击移动距离，超过则视为拖动
 
         self.setup_ui()
 
@@ -95,6 +97,7 @@ class FloatingWidget(QWidget):
         """鼠标按下事件 - 开始拖动"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self.click_start_pos = event.globalPosition().toPoint()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
 
@@ -109,11 +112,29 @@ class FloatingWidget(QWidget):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.drag_position = None
 
-        # 点击效果
+        # 单击效果 - 切换聊天窗口显示/隐藏
         if event.button() == Qt.MouseButton.LeftButton:
-            # 简单判断是点击还是拖动
-            # 如果移动距离很小，视为点击
-            pass
+            # 判断是点击还是拖动
+            if self.click_start_pos:
+                current_pos = event.globalPosition().toPoint()
+                distance = ((current_pos.x() - self.click_start_pos.x()) ** 2 +
+                           (current_pos.y() - self.click_start_pos.y()) ** 2) ** 0.5
+
+                # 如果移动距离很小，视为点击
+                if distance < self.max_click_distance:
+                    self.toggle_chat_window()
+
+            self.click_start_pos = None
+
+    def toggle_chat_window(self):
+        """切换聊天窗口显示/隐藏"""
+        if self.chat_window:
+            if self.chat_window.isVisible():
+                self.chat_window.hide()
+            else:
+                self.chat_window.show()
+                self.chat_window.raise_()
+                self.chat_window.activateWindow()
 
     def mouseDoubleClickEvent(self, event):
         """双击事件 - 切换聊天窗口"""

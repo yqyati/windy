@@ -255,11 +255,12 @@ class MessageBubble(QFrame):
 class ChatWindow(QMainWindow):
     """聊天窗口"""
 
-    def __init__(self, ai_client, config_manager, config):
+    def __init__(self, ai_client, config_manager, config, floating_widget=None):
         super().__init__()
         self.ai_client = ai_client
         self.config_manager = config_manager
         self.config = config
+        self.floating_widget = floating_widget
         self.current_image = None
         self.is_loading = False
         self.assistant_bubble = None
@@ -338,8 +339,8 @@ class ChatWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
 
         # 创建顶部工具栏
-        toolbar = self._create_toolbar()
-        main_layout.addWidget(toolbar)
+        self.toolbar = self._create_toolbar()
+        main_layout.addWidget(self.toolbar)
 
         # 创建聊天区域
         self.chat_area = self._create_chat_area()
@@ -377,8 +378,25 @@ class ChatWindow(QMainWindow):
         """)
         settings_btn.clicked.connect(self.show_settings)
 
+        # 最小化按钮
+        minimize_btn = QPushButton('🤖')
+        minimize_btn.setFixedSize(36, 36)
+        minimize_btn.setToolTip('缩小为悬浮助手')
+        minimize_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                font-size: 20px;
+            }
+            QPushButton:hover {
+                background-color: #2a2a4a;
+            }
+        """)
+        minimize_btn.clicked.connect(self.minimize_to_floating)
+
         layout.addWidget(logo)
         layout.addStretch()
+        layout.addWidget(minimize_btn)
         layout.addWidget(settings_btn)
 
         return toolbar
@@ -752,6 +770,12 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             print(f'图片加载失败: {e}')
         return None
+
+    def minimize_to_floating(self):
+        """缩小为悬浮助手"""
+        if self.floating_widget:
+            self.hide()
+            self.floating_widget.show()
 
     def show_settings(self):
         """显示设置对话框"""

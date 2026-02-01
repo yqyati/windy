@@ -72,12 +72,15 @@ class WindyApp(QApplication):
 
     def create_windows(self):
         """创建窗口"""
+        # 创建悬浮助手（先创建）
+        self.floating_widget = FloatingWidget(None)
+
         # 创建聊天窗口（初始隐藏）
-        self.chat_window = ChatWindow(self.ai_client, self.config_manager, self.config)
+        self.chat_window = ChatWindow(self.ai_client, self.config_manager, self.config, self.floating_widget)
         self.chat_window.hide()
 
-        # 创建悬浮助手
-        self.floating_widget = FloatingWidget(self.chat_window)
+        # 设置悬浮助手的聊天窗口引用
+        self.floating_widget.chat_window = self.chat_window
         self.floating_widget.show()
 
     def run(self):
