@@ -556,12 +556,25 @@ class ChatWindow(QMainWindow):
     def capture_screenshot(self):
         """截取屏幕"""
         try:
+            # 隐藏窗口以避免截图包含本应用
+            self.hide()
+
+            # 延迟一下确保窗口已隐藏
+            import time
+            time.sleep(0.2)
+
             capture = ScreenshotCapture()
             base64_img = capture.capture_to_base64()
             if base64_img:
                 self.current_image = base64_img
                 self._show_image_preview(base64_img)
+
+            # 显示窗口
+            self.show()
+            self.activateWindow()
+            self.raise_()
         except Exception as e:
+            self.show()
             QMessageBox.warning(self, '截图失败', str(e))
 
     def upload_image(self):
