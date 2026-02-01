@@ -202,11 +202,11 @@ class AIClient:
         """
         self.config.update(config)
         # 创建不使用代理的 httpx 客户端
-        http_client = httpx.Client()
+        #http_client = httpx.Client()
         self.client = OpenAI(
             api_key=self.config.get('apiKey'),
             base_url=self.config.get('baseUrl'),
-            http_client=http_client
+            #http_client=http_client
         )
 
 

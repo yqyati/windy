@@ -114,7 +114,7 @@ class MessageBubble(QFrame):
                 background-color: {'#f5576c' if self.role == 'user' else '#16213e'};
                 border-radius: 16px;
                 padding: 12px 16px;
-                max-width: 70%;
+                max-width: 85%;
             }}
         """)
 
