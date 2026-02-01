@@ -319,9 +319,10 @@ class ChatWindow(QMainWindow):
                 background-color: #0f3460;
                 border: 1px solid #2a2a4a;
                 border-radius: 8px;
-                padding: 10px;
+                padding: 12px;
                 color: #eaeaea;
-                font-size: 14px;
+                font-size: 15px;
+                line-height: 1.5;
             }
             QTextEdit:focus {
                 border-color: #e94560;
@@ -428,7 +429,7 @@ class ChatWindow(QMainWindow):
         """创建输入区域"""
         input_widget = QWidget()
         input_widget.setStyleSheet('background-color: #16213e; border-top: 1px solid #2a2a4a; padding: 16px;')
-        input_widget.setMaximumHeight(150)
+        input_widget.setMaximumHeight(200)
 
         layout = QVBoxLayout(input_widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -448,24 +449,24 @@ class ChatWindow(QMainWindow):
         # 输入框
         self.message_input = QTextEdit()
         self.message_input.setPlaceholderText('输入消息...')
-        self.message_input.setMaximumHeight(80)
+        self.message_input.setMaximumHeight(150)
         self.message_input.textChanged.connect(self._auto_resize)
 
         # 截图按钮
         screenshot_btn = QPushButton('📷')
-        screenshot_btn.setFixedSize(40, 40)
+        screenshot_btn.setFixedSize(50, 50)
         screenshot_btn.setToolTip('截取屏幕')
         screenshot_btn.clicked.connect(self.capture_screenshot)
 
         # 上传按钮
         upload_btn = QPushButton('📁')
-        upload_btn.setFixedSize(40, 40)
+        upload_btn.setFixedSize(50, 50)
         upload_btn.setToolTip('上传图片')
         upload_btn.clicked.connect(self.upload_image)
 
         # 发送按钮
         self.send_btn = QPushButton('发送')
-        self.send_btn.setFixedSize(80, 40)
+        self.send_btn.setFixedSize(100, 50)
         self.send_btn.clicked.connect(self.send_message)
 
         # 快捷键按钮
@@ -530,7 +531,7 @@ class ChatWindow(QMainWindow):
     def _auto_resize(self):
         """自动调整输入框高度"""
         height = self.message_input.document().size().height()
-        self.message_input.setFixedHeight(int(min(height + 20, 80)))
+        self.message_input.setFixedHeight(int(min(height + 30, 150)))
 
     def send_message(self):
         """发送消息"""
@@ -559,7 +560,7 @@ class ChatWindow(QMainWindow):
 
         # 清空输入
         self.message_input.clear()
-        self.message_input.setFixedHeight(40)
+        self.message_input.setFixedHeight(80)
         self._remove_image_preview()
 
         # 创建assistant消息气泡（空内容，用于流式更新）
