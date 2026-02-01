@@ -20,18 +20,26 @@ from src.screenshot import ScreenshotCapture
 
 class ChatThread(QThread):
     """聊天请求线程"""
-    response_received = pyqtSignal(dict)
+    stream_received = pyqtSignal(str)  # 流式内容信号
+    stream_finished = pyqtSignal(str)  # 流式完成信号
     error_occurred = pyqtSignal(str)
 
     def __init__(self, ai_client, messages):
         super().__init__()
         self.ai_client = ai_client
         self.messages = messages
+        self.full_content = ''
 
     def run(self):
         try:
-            response = self.ai_client.chat(self.messages)
-            self.response_received.emit(response)
+            for chunk in self.ai_client.chat_stream(self.messages):
+                if chunk.get('choices') and len(chunk['choices']) > 0:
+                    delta = chunk['choices'][0].get('delta', {})
+                    content = delta.get('content', '')
+                    if content:
+                        self.full_content += content
+                        self.stream_received.emit(content)
+            self.stream_finished.emit(self.full_content)
         except Exception as e:
             self.error_occurred.emit(str(e))
 
@@ -39,11 +47,27 @@ class ChatThread(QThread):
 class MessageBubble(QFrame):
     """消息气泡"""
 
-    def __init__(self, role: str, content: Any, parent=None):
+    def __init__(self, role: str, content: Any, parent=None, streamable: bool = False):
         super().__init__(parent)
         self.role = role
         self.content = content
+        self.streamable = streamable
+        self.text_label = None
+        self.content_widget = None
         self.setup_ui()
+
+    def update_content(self, text: str):
+        """更新文本内容（用于流式输出）"""
+        if self.text_label and self.streamable:
+            self.text_label.setText(text)
+            self.content = text
+
+    def append_content(self, text: str):
+        """追加文本内容（用于流式输出）"""
+        if self.text_label and self.streamable:
+            current = self.text_label.text()
+            self.text_label.setText(current + text)
+            self.content = current + text
 
     def setup_ui(self):
         """设置UI"""
@@ -72,6 +96,7 @@ class MessageBubble(QFrame):
 
         # 内容
         content_widget = QWidget()
+        self.content_widget = content_widget
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -89,7 +114,7 @@ class MessageBubble(QFrame):
                     text_label = self._create_text_label(item['text'])
                     content_layout.addWidget(text_label)
         else:
-            text_label = self._create_text_label(self.content)
+            text_label = self._create_text_label(self.content if self.content else '')
             content_layout.addWidget(text_label)
 
         # 样式
@@ -114,7 +139,7 @@ class MessageBubble(QFrame):
                 background-color: {'#f5576c' if self.role == 'user' else '#16213e'};
                 border-radius: 16px;
                 padding: 12px 16px;
-                max-width: 85%;
+                max-width: 300%;
             }}
         """)
 
@@ -130,6 +155,9 @@ class MessageBubble(QFrame):
                 line-height: 1.6;
             }
         """)
+        # 保存文本标签引用（用于流式更新）
+        if not self.text_label:
+            self.text_label = label
         return label
 
     def _base64_to_pixmap(self, data_url: str) -> QPixmap:
@@ -160,6 +188,7 @@ class ChatWindow(QMainWindow):
         self.messages = []
         self.current_image = None
         self.is_loading = False
+        self.assistant_bubble = None
 
         self.setup_ui()
         self.setup_shortcuts()
@@ -428,6 +457,9 @@ class ChatWindow(QMainWindow):
         self.message_input.setFixedHeight(40)
         self._remove_image_preview()
 
+        # 创建assistant消息气泡（空内容，用于流式更新）
+        self.assistant_bubble = self._append_message('assistant', '', streamable=True)
+
         # 发送请求
         self.is_loading = True
         self.send_btn.setEnabled(False)
@@ -435,12 +467,13 @@ class ChatWindow(QMainWindow):
 
         # 创建线程
         self.chat_thread = ChatThread(self.ai_client, self.messages)
-        self.chat_thread.response_received.connect(self._on_response)
+        self.chat_thread.stream_received.connect(self._on_stream_chunk)
+        self.chat_thread.stream_finished.connect(self._on_stream_finished)
         self.chat_thread.error_occurred.connect(self._on_error)
         self.chat_thread.start()
 
     def _on_response(self, response):
-        """处理响应"""
+        """处理响应（已弃用，保留用于兼容性）"""
         self.is_loading = False
         self.send_btn.setEnabled(True)
         self.send_btn.setText('发送')
@@ -453,6 +486,29 @@ class ChatWindow(QMainWindow):
         self.messages.append(assistant_message)
         self._append_message('assistant', assistant_content)
 
+    def _on_stream_chunk(self, chunk: str):
+        """处理流式响应片段"""
+        if self.assistant_bubble:
+            self.assistant_bubble.append_content(chunk)
+            # 自动滚动到底部
+            QTimer.singleShot(10, lambda: self.chat_area.verticalScrollBar().setValue(
+                self.chat_area.verticalScrollBar().maximum()
+            ))
+
+    def _on_stream_finished(self, full_content: str):
+        """流式响应完成"""
+        self.is_loading = False
+        self.send_btn.setEnabled(True)
+        self.send_btn.setText('发送')
+
+        # 保存完整消息到历史
+        assistant_message = {
+            'role': 'assistant',
+            'content': full_content
+        }
+        self.messages.append(assistant_message)
+        self.assistant_bubble = None
+
     def _on_error(self, error):
         """处理错误"""
         self.is_loading = False
@@ -461,9 +517,9 @@ class ChatWindow(QMainWindow):
 
         self._append_message('system', f'错误: {error}')
 
-    def _append_message(self, role: str, content):
+    def _append_message(self, role: str, content, streamable: bool = False):
         """追加消息"""
-        message_bubble = MessageBubble(role, content)
+        message_bubble = MessageBubble(role, content, streamable=streamable)
         container_layout = self.chat_container.layout()
 
         # 移除最后一个stretch
@@ -483,6 +539,8 @@ class ChatWindow(QMainWindow):
         QTimer.singleShot(100, lambda: self.chat_area.verticalScrollBar().setValue(
             self.chat_area.verticalScrollBar().maximum()
         ))
+
+        return message_bubble
 
     def _remove_welcome_message(self):
         """移除欢迎消息"""
